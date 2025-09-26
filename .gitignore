@@ -36,4 +36,11 @@ yarn-error.*
 # typescript
 *.tsbuildinfo
 
+# Logs
+*.log
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
 app-example
