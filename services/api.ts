@@ -1,17 +1,28 @@
-// Type definitions for watch providers
-interface WatchProvider {
-  logo_path: string;
-  provider_id: number;
-  provider_name: string;
-  display_priority: number;
-}
+import type {
+  EmbedUrlParams,
+  Movie,
+  MovieDetails,
+  MovieEmbedData,
+  PlayerEventData,
+  PlayerMessage,
+  ProgressEventHandlers,
+  ProgressTrackingConfig,
+  TVEmbedData,
+  TVShow,
+  TVShowDetails,
+  TrendingMovie,
+  TrendingTVShow,
+  Video,
+  VideoEmbedOptions,
+  VideoResponse,
+  WatchProgress,
+  WatchProgressStorage,
+  WatchProvider,
+  WatchProviderRegion,
+  WatchProviderResponse
+} from '../interfaces/interfaces';
 
-interface WatchProviderRegion {
-  iso_3166_1: string;
-  english_name: string;
-  native_name: string;
-}
-
+// Type definitions for watch providers that are not in the main interfaces
 interface WatchProviders {
   id: number;
   results: {
@@ -22,24 +33,6 @@ interface WatchProviders {
       buy?: WatchProvider[];
     };
   };
-}
-
-interface Video {
-  id: string;
-  iso_639_1: string;
-  iso_3166_1: string;
-  key: string;
-  name: string;
-  official: boolean;
-  published_at: string;
-  site: string;
-  size: number;
-  type: string;
-}
-
-interface VideoResponse {
-  id: number;
-  results: Video[];
 }
 
 export const TMDB_CONFIG = {
@@ -908,4 +901,410 @@ export const fetchMovieWatchProviders = async (
     console.error("Error fetching movie watch providers:", error);
     throw error;
   }
+};
+
+// Video Embed Service Configuration
+export const EMBED_CONFIG = {
+  BASE_URL: "https://www.vidking.net/embed",
+  DEFAULT_OPTIONS: {
+    width: "100%",
+    height: "600",
+    allowFullscreen: true,
+    autoPlay: false,
+  } as VideoEmbedOptions,
+};
+
+// Helper function to validate TMDB ID
+const validateTmdbId = (tmdbId: number): boolean => {
+  return !!(tmdbId && tmdbId > 0 && Number.isInteger(tmdbId));
+};
+
+// Helper function to validate season and episode
+const validateEpisode = (season: number, episode: number): boolean => {
+  return !!(
+    season && season > 0 && Number.isInteger(season) &&
+    episode && episode > 0 && Number.isInteger(episode)
+  );
+};
+
+// Helper function to validate hex color (without #)
+const validateHexColor = (color: string): boolean => {
+  const hexPattern = /^[0-9A-Fa-f]{6}$/;
+  return hexPattern.test(color);
+};
+
+// Helper function to validate progress time
+const validateProgress = (progress: number): boolean => {
+  return progress >= 0 && Number.isFinite(progress);
+};
+
+// Helper function to build URL parameters
+const buildUrlParameters = (options: VideoEmbedOptions, mediaType: 'movie' | 'tv'): string => {
+  const params = new URLSearchParams();
+  
+  // Validate and add color parameter
+  if (options.color) {
+    if (!validateHexColor(options.color)) {
+      throw new Error(`Invalid color format: ${options.color}. Must be a 6-character hex color without #.`);
+    }
+    params.append('color', options.color);
+  }
+  
+  // Add autoPlay parameter
+  if (options.autoPlay !== undefined) {
+    params.append('autoPlay', options.autoPlay.toString());
+  }
+  
+  // Add TV-specific parameters
+  if (mediaType === 'tv') {
+    if (options.nextEpisode !== undefined) {
+      params.append('nextEpisode', options.nextEpisode.toString());
+    }
+    
+    if (options.episodeSelector !== undefined) {
+      params.append('episodeSelector', options.episodeSelector.toString());
+    }
+  }
+  
+  // Validate and add progress parameter
+  if (options.progress !== undefined) {
+    if (!validateProgress(options.progress)) {
+      throw new Error(`Invalid progress time: ${options.progress}. Must be a non-negative number.`);
+    }
+    params.append('progress', options.progress.toString());
+  }
+  
+  const queryString = params.toString();
+  return queryString ? `?${queryString}` : '';
+};
+
+// Generate movie embed URL (basic)
+export const getMovieEmbedUrl = (tmdbId: number): string => {
+  if (!validateTmdbId(tmdbId)) {
+    throw new Error(`Invalid TMDB ID: ${tmdbId}. Must be a positive integer.`);
+  }
+  
+  return `${EMBED_CONFIG.BASE_URL}/movie/${tmdbId}`;
+};
+
+// Generate movie embed URL with parameters
+export const getMovieEmbedUrlWithParams = (tmdbId: number, options: VideoEmbedOptions = {}): string => {
+  const baseUrl = getMovieEmbedUrl(tmdbId);
+  const params = buildUrlParameters(options, 'movie');
+  return `${baseUrl}${params}`;
+};
+
+// Generate TV series embed URL (basic)
+export const getTVEmbedUrl = (tmdbId: number, season: number, episode: number): string => {
+  if (!validateTmdbId(tmdbId)) {
+    throw new Error(`Invalid TMDB ID: ${tmdbId}. Must be a positive integer.`);
+  }
+  
+  if (!validateEpisode(season, episode)) {
+    throw new Error(`Invalid season (${season}) or episode (${episode}). Both must be positive integers.`);
+  }
+  
+  return `${EMBED_CONFIG.BASE_URL}/tv/${tmdbId}/${season}/${episode}`;
+};
+
+// Generate TV series embed URL with parameters
+export const getTVEmbedUrlWithParams = (tmdbId: number, season: number, episode: number, options: VideoEmbedOptions = {}): string => {
+  const baseUrl = getTVEmbedUrl(tmdbId, season, episode);
+  const params = buildUrlParameters(options, 'tv');
+  return `${baseUrl}${params}`;
+};
+
+// Generate movie embed data
+export const getMovieEmbedData = (
+  tmdbId: number, 
+  options?: VideoEmbedOptions
+): MovieEmbedData => {
+  const finalOptions = { ...EMBED_CONFIG.DEFAULT_OPTIONS, ...options };
+  const embedUrl = options && Object.keys(options).some(key => ['color', 'autoPlay', 'progress'].includes(key))
+    ? getMovieEmbedUrlWithParams(tmdbId, options)
+    : getMovieEmbedUrl(tmdbId);
+  
+  return {
+    tmdbId,
+    embedUrl,
+    type: 'movie',
+    options: finalOptions,
+  };
+};
+
+// Generate TV series embed data
+export const getTVEmbedData = (
+  tmdbId: number,
+  season: number,
+  episode: number,
+  options?: VideoEmbedOptions
+): TVEmbedData => {
+  const finalOptions = { ...EMBED_CONFIG.DEFAULT_OPTIONS, ...options };
+  const embedUrl = options && Object.keys(options).some(key => ['color', 'autoPlay', 'nextEpisode', 'episodeSelector', 'progress'].includes(key))
+    ? getTVEmbedUrlWithParams(tmdbId, season, episode, options)
+    : getTVEmbedUrl(tmdbId, season, episode);
+  
+  return {
+    tmdbId,
+    season,
+    episode,
+    embedUrl,
+    type: 'tv',
+    options: finalOptions,
+  };
+};
+
+// Universal embed URL generator (basic)
+export const getEmbedUrl = (params: EmbedUrlParams): string => {
+  const { tmdbId, season, episode, mediaType } = params;
+  
+  if (mediaType === 'movie') {
+    return getMovieEmbedUrl(tmdbId);
+  } else if (mediaType === 'tv') {
+    if (season === undefined || episode === undefined) {
+      throw new Error('Season and episode are required for TV series embed URLs');
+    }
+    return getTVEmbedUrl(tmdbId, season, episode);
+  } else {
+    throw new Error(`Invalid media type: ${mediaType}. Must be 'movie' or 'tv'.`);
+  }
+};
+
+// Universal embed URL generator with parameters
+export const getEmbedUrlWithParams = (params: EmbedUrlParams, options: VideoEmbedOptions = {}): string => {
+  const { tmdbId, season, episode, mediaType } = params;
+  
+  if (mediaType === 'movie') {
+    return getMovieEmbedUrlWithParams(tmdbId, options);
+  } else if (mediaType === 'tv') {
+    if (season === undefined || episode === undefined) {
+      throw new Error('Season and episode are required for TV series embed URLs');
+    }
+    return getTVEmbedUrlWithParams(tmdbId, season, episode, options);
+  } else {
+    throw new Error(`Invalid media type: ${mediaType}. Must be 'movie' or 'tv'.`);
+  }
+};
+
+// Generate HTML iframe embed code
+export const generateEmbedHTML = (
+  embedUrl: string, 
+  options?: VideoEmbedOptions
+): string => {
+  const finalOptions = { ...EMBED_CONFIG.DEFAULT_OPTIONS, ...options };
+  
+  return `<iframe src="${embedUrl}" width="${finalOptions.width}" height="${finalOptions.height}" frameborder="0" ${finalOptions.allowFullscreen ? 'allowfullscreen' : ''}></iframe>`;
+};
+
+// ===== WATCH PROGRESS TRACKING =====
+
+// Default configuration for progress tracking
+export const PROGRESS_CONFIG: ProgressTrackingConfig = {
+  enableLocalStorage: true,
+  enableConsoleLogging: true,
+  saveInterval: 10, // Save every 10 seconds
+  completionThreshold: 90, // Consider completed at 90%
+};
+
+// LocalStorage key for watch progress
+const PROGRESS_STORAGE_KEY = 'movieapp_watch_progress';
+
+// Generate unique content ID for tracking
+export const generateContentId = (tmdbId: number, season?: number, episode?: number): string => {
+  if (season !== undefined && episode !== undefined) {
+    return `tv_${tmdbId}_s${season}e${episode}`;
+  }
+  return `movie_${tmdbId}`;
+};
+
+// Parse content ID back to components
+export const parseContentId = (contentId: string): { tmdbId: number; mediaType: 'movie' | 'tv'; season?: number; episode?: number } => {
+  const parts = contentId.split('_');
+  const mediaType = parts[0] as 'movie' | 'tv';
+  const tmdbId = parseInt(parts[1]);
+  
+  if (mediaType === 'tv' && parts[2]) {
+    const seasonEpisode = parts[2];
+    const seasonMatch = seasonEpisode.match(/s(\d+)e(\d+)/);
+    if (seasonMatch) {
+      return {
+        tmdbId,
+        mediaType,
+        season: parseInt(seasonMatch[1]),
+        episode: parseInt(seasonMatch[2])
+      };
+    }
+  }
+  
+  return { tmdbId, mediaType };
+};
+
+// Save watch progress to localStorage
+export const saveWatchProgress = (progress: WatchProgress): void => {
+  try {
+    const stored = getStoredProgress();
+    stored[progress.id] = progress;
+    localStorage.setItem(PROGRESS_STORAGE_KEY, JSON.stringify(stored));
+  } catch (error) {
+    console.error('Failed to save watch progress:', error);
+  }
+};
+
+// Load watch progress from localStorage
+export const loadWatchProgress = (contentId: string): WatchProgress | null => {
+  try {
+    const stored = getStoredProgress();
+    return stored[contentId] || null;
+  } catch (error) {
+    console.error('Failed to load watch progress:', error);
+    return null;
+  }
+};
+
+// Get all stored progress
+export const getStoredProgress = (): WatchProgressStorage => {
+  try {
+    const stored = localStorage.getItem(PROGRESS_STORAGE_KEY);
+    return stored ? JSON.parse(stored) : {};
+  } catch (error) {
+    console.error('Failed to parse stored progress:', error);
+    return {};
+  }
+};
+
+// Clear specific progress entry
+export const clearWatchProgress = (contentId: string): void => {
+  try {
+    const stored = getStoredProgress();
+    delete stored[contentId];
+    localStorage.setItem(PROGRESS_STORAGE_KEY, JSON.stringify(stored));
+  } catch (error) {
+    console.error('Failed to clear watch progress:', error);
+  }
+};
+
+// Clear all progress
+export const clearAllProgress = (): void => {
+  try {
+    localStorage.removeItem(PROGRESS_STORAGE_KEY);
+  } catch (error) {
+    console.error('Failed to clear all progress:', error);
+  }
+};
+
+// Convert player event data to watch progress
+export const eventDataToProgress = (eventData: PlayerEventData, title?: string): WatchProgress => {
+  const contentId = generateContentId(parseInt(eventData.id), eventData.season, eventData.episode);
+  const isCompleted = eventData.progress >= (PROGRESS_CONFIG.completionThreshold || 90);
+  
+  return {
+    id: contentId,
+    mediaType: eventData.mediaType,
+    tmdbId: parseInt(eventData.id),
+    title,
+    season: eventData.season,
+    episode: eventData.episode,
+    currentTime: eventData.currentTime,
+    duration: eventData.duration,
+    progress: eventData.progress,
+    lastWatched: eventData.timestamp,
+    completed: isCompleted
+  };
+};
+
+// Main progress tracking handler
+export const handleProgressEvent = (
+  eventData: PlayerEventData, 
+  config: ProgressTrackingConfig = PROGRESS_CONFIG,
+  title?: string
+): void => {
+  if (config.enableConsoleLogging) {
+    console.log(`Player Event [${eventData.event}]:`, eventData);
+  }
+  
+  // Convert to progress format
+  const progress = eventDataToProgress(eventData, title);
+  
+  // Save to localStorage if enabled
+  if (config.enableLocalStorage) {
+    saveWatchProgress(progress);
+  }
+  
+  // Use custom save function if provided
+  if (config.customSaveFunction) {
+    config.customSaveFunction(progress).catch(error => {
+      console.error('Custom save function failed:', error);
+    });
+  }
+};
+
+// Setup message listener for player events
+export const setupProgressTracking = (
+  handlers?: ProgressEventHandlers,
+  config: ProgressTrackingConfig = PROGRESS_CONFIG
+): (() => void) => {
+  const messageHandler = (event: MessageEvent) => {
+    try {
+      if (typeof event.data === 'string') {
+        const message: PlayerMessage = JSON.parse(event.data);
+        
+        if (message.type === 'PLAYER_EVENT') {
+          const eventData = message.data;
+          
+          // Handle the progress tracking
+          handleProgressEvent(eventData, config);
+          
+          // Call specific event handlers
+          switch (eventData.event) {
+            case 'play':
+              handlers?.onPlay?.(eventData);
+              break;
+            case 'pause':
+              handlers?.onPause?.(eventData);
+              break;
+            case 'timeupdate':
+              handlers?.onTimeUpdate?.(eventData);
+              break;
+            case 'ended':
+              handlers?.onEnded?.(eventData);
+              break;
+            case 'seeked':
+              handlers?.onSeeked?.(eventData);
+              break;
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Failed to handle player message:', error);
+    }
+  };
+  
+  // Add event listener
+  window.addEventListener('message', messageHandler);
+  
+  // Return cleanup function
+  return () => {
+    window.removeEventListener('message', messageHandler);
+  };
+};
+
+// Get progress for resume watching
+export const getResumeProgress = (tmdbId: number, season?: number, episode?: number): WatchProgress | null => {
+  const contentId = generateContentId(tmdbId, season, episode);
+  const progress = loadWatchProgress(contentId);
+  
+  // Only return if not completed and has meaningful progress (> 5%)
+  if (progress && !progress.completed && progress.progress > 5) {
+    return progress;
+  }
+  
+  return null;
+};
+
+// Get all incomplete progress (for continue watching list)
+export const getIncompleteProgress = (): WatchProgress[] => {
+  const stored = getStoredProgress();
+  return Object.values(stored)
+    .filter(progress => !progress.completed && progress.progress > 5)
+    .sort((a, b) => b.lastWatched - a.lastWatched); // Sort by most recently watched
 };
